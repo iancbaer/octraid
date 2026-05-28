@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #0a0a0f;
+  color: #e2e8f0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Tier badge colors */
+.tier-Unverified { @apply bg-oct-muted text-oct-text-dim; }
+.tier-Low { @apply bg-yellow-900/40 text-yellow-400 border border-yellow-800; }
+.tier-Standard { @apply bg-indigo-900/40 text-indigo-400 border border-indigo-800; }
+.tier-High { @apply bg-emerald-900/40 text-emerald-400 border border-emerald-800; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #12121a; }
+::-webkit-scrollbar-thumb { background: #2a2a3e; border-radius: 3px; }
