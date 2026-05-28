@@ -169,16 +169,45 @@ export class OctraRpcClient {
     }
   }
 
-  // Call a Circle's view method (read-only). Uses octra_circleView — no transaction required.
-  // Auth signature: Ed25519 over "octra_circle_view|circle_id|caller_addr"
-  async queryCircle(circleId: string, method: string, params: unknown[]): Promise<unknown> {
-    if (!this.privateKey || !this.address) {
-      // Unauthenticated view
-      return this.rpc<unknown>("octra_circleView", [circleId, method, JSON.stringify(params), "", false]);
-    }
-    const sigMsg = `octra_circle_view|${circleId}|${this.address}`;
+  // Read a single KV entry from a Circle's stable storage (sealed_read auth required).
+  // Auth: Ed25519 over "octra_circle_storage|circle_id|addr|key"
+  async readCircleStorage(circleId: string, key: string): Promise<string | null> {
+    if (!this.privateKey || !this.address) throw new Error("No wallet configured");
+    const sigMsg = `octra_circle_storage|${circleId}|${this.address}|${key}`;
     const sig = signSync(this.privateKey, Buffer.from(sigMsg, "utf8"));
-    return this.rpc<unknown>("octra_circleViewAuth", [circleId, method, JSON.stringify(params), this.address, this.publicKey, sig, false]);
+    const result = await this.rpc<{ value?: string; data?: string } | null>(
+      "octra_circleStorageAuth",
+      [circleId, key, this.address, this.publicKey, sig]
+    );
+    if (!result) return null;
+    if (typeof result === "string") return result;
+    return (result as Record<string, string>).value ?? (result as Record<string, string>).data ?? null;
+  }
+
+  // Dump all KV entries from a Circle's stable storage.
+  // Auth: Ed25519 over "octra_circle_storage_dump|circle_id|addr"
+  async dumpCircleStorage(circleId: string): Promise<Record<string, string>> {
+    if (!this.privateKey || !this.address) throw new Error("No wallet configured");
+    const sigMsg = `octra_circle_storage_dump|${circleId}|${this.address}`;
+    const sig = signSync(this.privateKey, Buffer.from(sigMsg, "utf8"));
+    const result = await this.rpc<{ storage?: Record<string, string> }>(
+      "octra_circleStorageDumpAuth",
+      [circleId, this.address, this.publicKey, sig]
+    );
+    return result?.storage ?? {};
+  }
+
+  // Circle view via octra_circleViewAuth. Note: sealed Circles with resource_mode "sealed_read"
+  // require a Circle Relayer for WASM view execution. Use readCircleStorage for direct reads.
+  async queryCircle(circleId: string, method: string, params: unknown[]): Promise<unknown> {
+    if (!this.privateKey || !this.address) throw new Error("No wallet configured");
+    const { createHash } = require("crypto");
+    const paramsDump = JSON.stringify(params);
+    const paramsHash = createHash("sha256").update(paramsDump).digest("hex");
+    const subject = `${method}|${paramsHash}|0`;
+    const sigMsg = `octra_circle_view|${circleId}|${this.address}|${subject}`;
+    const sig = signSync(this.privateKey, Buffer.from(sigMsg, "utf8"));
+    return this.rpc<unknown>("octra_circleViewAuth", [circleId, method, params, this.address, this.publicKey, sig, false]);
   }
 
   // Call a Circle's state-changing method (submits a transaction).
@@ -202,7 +231,10 @@ export class OctraRpcClient {
   async computeCircleAddress(wasmBytes: Buffer, nonce: number): Promise<string> {
     if (!this.address) throw new Error("No wallet configured");
     const wasmB64 = wasmBytes.toString("base64");
-    return this.rpc<string>("octra_computeContractAddress", [wasmB64, this.address, nonce]);
+    const result = await this.rpc<{ address?: string } | string>("octra_computeContractAddress", [wasmB64, this.address, nonce]);
+    if (typeof result === "string") return result;
+    if (result?.address) return result.address;
+    throw new Error(`Unexpected computeContractAddress response: ${JSON.stringify(result)}`);
   }
 
   // Deploy a compiled Circle WASM binary.
